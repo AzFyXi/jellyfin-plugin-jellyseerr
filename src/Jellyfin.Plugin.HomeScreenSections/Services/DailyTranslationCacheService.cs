@@ -37,7 +37,7 @@ namespace Jellyfin.Plugin.HomeScreenSections.Services
 
             if (!string.IsNullOrEmpty(gitBranch))
             {
-                HttpResponseMessage treesResponse = await client.GetAsync(new Uri($"https://api.github.com/repos/IAmParadox27/jellyfin-plugin-home-sections/git/trees/{gitBranch}?recursive=1"), cancellationToken);
+                HttpResponseMessage treesResponse = await client.GetAsync(new Uri($"https://api.github.com/repos/AzFyXi/jellyfin-plugin-home-sections/git/trees/{gitBranch}?recursive=1"), cancellationToken);
 
                 // After getting the trees we say we're 10% just to signify something has happened
                 double currentProgress = 0.1;
@@ -55,7 +55,7 @@ namespace Jellyfin.Plugin.HomeScreenSections.Services
                     
                     foreach (string blobUrl in blobUrls)
                     {
-                        HttpResponseMessage blobResponse = await client.GetAsync(new Uri($"https://raw.githubusercontent.com/IAmParadox27/jellyfin-plugin-home-sections/refs/heads/{gitBranch}/{blobUrl}"), cancellationToken);
+                        HttpResponseMessage blobResponse = await client.GetAsync(new Uri($"https://raw.githubusercontent.com/AzFyXi/jellyfin-plugin-home-sections/refs/heads/{gitBranch}/{blobUrl}"), cancellationToken);
                         string blobJsonRaw = await blobResponse.Content.ReadAsStringAsync(cancellationToken);
                         
                         string languageCode = Path.GetFileNameWithoutExtension(blobUrl);
