@@ -7,6 +7,7 @@ using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Newtonsoft.Json.Linq;
 
 namespace Jellyfin.Plugin.HomeScreenSections.HomeScreen.Sections
@@ -19,8 +20,8 @@ namespace Jellyfin.Plugin.HomeScreenSections.HomeScreen.Sections
         
         protected override string JellyseerEndpoint => "/api/v1/discover/tv";
         
-        public DiscoverTvSection(IUserManager userManager, ImageCacheService imageCacheService) 
-            : base(userManager, imageCacheService)
+        public DiscoverTvSection(IUserManager userManager, ImageCacheService imageCacheService, ArrApiService arrApiService, ILogger<DiscoverSection> logger) 
+            : base(userManager, imageCacheService, arrApiService, logger)
         {
         }
     }

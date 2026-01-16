@@ -81,13 +81,17 @@ namespace Jellyfin.Plugin.HomeScreenSections.Controllers
             IEnumerable<SectionSettings> adminLockedSections =
                 HomeScreenSectionsPlugin.Instance.Configuration.SectionSettings.Where(x => !x.AllowUserOverride);
             
-            return m_homeScreenManager.GetUserSettings(userId) ?? new ModularHomeUserSettings
+            var settings = m_homeScreenManager.GetUserSettings(userId) ?? new ModularHomeUserSettings
             {
                 UserId = userId,
                 EnabledSections = defaultEnabledSections.Select(x => x.SectionId).ToList(),
                 LockedSections = adminLockedSections.Select(x => x.SectionId).ToList(),
                 DefaultEnabledSections = defaultEnabledSections.Select(x => x.SectionId).ToList()
             };
+
+            settings.JellyseerrExternalUrl = HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrExternalUrl;
+
+            return settings;
         }
 
         /// <summary>

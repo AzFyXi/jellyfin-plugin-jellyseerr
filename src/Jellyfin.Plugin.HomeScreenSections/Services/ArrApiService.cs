@@ -1,6 +1,9 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Jellyfin.Plugin.HomeScreenSections.Configuration;
+using Jellyfin.Plugin.HomeScreenSections.Helpers;
+using MediaBrowser.Model.Dto;
+using Newtonsoft.Json.Linq;
 
 namespace Jellyfin.Plugin.HomeScreenSections.Services
 {
@@ -16,14 +19,163 @@ namespace Jellyfin.Plugin.HomeScreenSections.Services
     {
         private readonly ILogger<ArrApiService> m_logger;
         private readonly HttpClient m_httpClient;
+        private readonly ImageCacheService m_imageCacheService;
 
-        public ArrApiService(ILogger<ArrApiService> logger, HttpClient httpClient)
+        public ArrApiService(ILogger<ArrApiService> logger, HttpClient httpClient, ImageCacheService imageCacheService)
         {
             m_logger = logger;
             m_httpClient = httpClient;
+            m_imageCacheService = imageCacheService;
         }
         
         private static PluginConfiguration Config => HomeScreenSectionsPlugin.Instance?.Configuration ?? new PluginConfiguration();
+
+        public async Task<List<BaseItemDto>> GetJellyseerrContentAsync(string endpoint, string username)
+        {
+            var results = new List<BaseItemDto>();
+            
+            string? jellyseerrUrl = Config.JellyseerrUrl;
+            string? jellyseerrApiKey = Config.JellyseerrApiKey;
+            string? jellyseerrExternalUrl = Config.JellyseerrExternalUrl;
+            
+            if (string.IsNullOrEmpty(jellyseerrUrl) || string.IsNullOrEmpty(jellyseerrApiKey))
+            {
+                m_logger.LogWarning("Jellyseerr URL or API Key is not configured.");
+                return results;
+            }
+
+            string jellyseerrDisplayUrl = !string.IsNullOrEmpty(jellyseerrExternalUrl) ? jellyseerrExternalUrl : jellyseerrUrl;
+
+            try
+            {
+                // 1. Get User ID
+                using var userRequest = new HttpRequestMessage(HttpMethod.Get, $"{jellyseerrUrl.TrimEnd('/')}/api/v1/user?q={username}");
+                userRequest.Headers.Add("X-Api-Key", jellyseerrApiKey);
+                
+                var userResponse = await m_httpClient.SendAsync(userRequest);
+                if (!userResponse.IsSuccessStatusCode)
+                {
+                    m_logger.LogError("Failed to get Jellyseerr user. Status: {Status}", userResponse.StatusCode);
+                    return results;
+                }
+
+                var userJsonStr = await userResponse.Content.ReadAsStringAsync();
+                var userJson = JObject.Parse(userJsonStr);
+                int? jellyseerrUserId = userJson.Value<JArray>("results")?
+                    .OfType<JObject>()
+                    .FirstOrDefault(x => x.Value<string>("jellyfinUsername") == username)?
+                    .Value<int>("id");
+
+                if (jellyseerrUserId == null)
+                {
+                    m_logger.LogWarning("Jellyseerr user not found for Jellyfin user: {Username}", username);
+                    return results;
+                }
+
+                // 2. Get Content
+                int page = 1;
+                while (results.Count < 20 && page <= 5) // Limit pages to avoid infinite loops
+                {
+                    using var contentRequest = new HttpRequestMessage(HttpMethod.Get, $"{jellyseerrUrl.TrimEnd('/')}{endpoint}?page={page}");
+                    contentRequest.Headers.Add("X-Api-Key", jellyseerrApiKey);
+                    contentRequest.Headers.Add("X-Api-User", jellyseerrUserId.ToString());
+
+                    var contentResponse = await m_httpClient.SendAsync(contentRequest);
+                    if (!contentResponse.IsSuccessStatusCode)
+                    {
+                        m_logger.LogError("Failed to get Jellyseerr content from {Endpoint}. Status: {Status}", endpoint, contentResponse.StatusCode);
+                        break;
+                    }
+
+                    var contentJsonStr = await contentResponse.Content.ReadAsStringAsync();
+                    if (string.IsNullOrEmpty(contentJsonStr)) break;
+
+                    var contentJson = JObject.Parse(contentJsonStr);
+                    var items = contentJson.Value<JArray>("results");
+
+                    if (items == null) break;
+
+                    foreach (JObject item in items.OfType<JObject>().Where(x => !x.Value<bool>("adult")))
+                    {
+                        // Check preferred languages
+                        if (!string.IsNullOrEmpty(Config.JellyseerrPreferredLanguages))
+                        {
+                            var langs = Config.JellyseerrPreferredLanguages.Split(',').Select(x => x.Trim());
+                            var itemLang = item.Value<string>("originalLanguage");
+                            if (itemLang != null && !langs.Contains(itemLang))
+                            {
+                                continue;
+                            }
+                        }
+
+                        // We only want items that are NOT already in the library (mediaInfo == null usually means not available)
+                        // But the logic in DiscoverSection checked if mediaInfo was null. 
+                        // If mediaInfo is NOT null, it means it might be in Jellyfin/Plex already. 
+                        // The original code: if (item.Value<JObject>("mediaInfo") == null)
+                        
+                        if (item.Value<JObject>("mediaInfo") == null)
+                        {
+                             string dateTimeString = item.Value<string>("firstAirDate") ??
+                                                    item.Value<string>("releaseDate") ?? "1970-01-01";
+                            
+                            if (string.IsNullOrWhiteSpace(dateTimeString))
+                            {
+                                dateTimeString = "1970-01-01";
+                            }
+                            
+                            string posterPath = item.Value<string>("posterPath") ?? "";
+                            string cachedImageUrl = "";
+                            if (!string.IsNullOrEmpty(posterPath))
+                            {
+                                cachedImageUrl = ImageCacheHelper.GetCachedImageUrl(m_imageCacheService, $"https://image.tmdb.org/t/p/w600_and_h900_bestv2{posterPath}");
+                            }
+                            
+                            var id = item.Value<int>("id");
+                            var mediaType = item.Value<string>("mediaType") ?? "movie"; // Default to movie if missing? Or derive?
+                            // For TV endpoints, mediaType might be missing in results if it's strictly TV endpoint? 
+                            // API v1 discover/tv usually implies TV. 
+                            
+                            // Generate a stable Hash ID for Jellyfin to use
+                            var stableIdStr = $"jellyseerr_{mediaType}_{id}";
+                            var stableId = GetStableHash(stableIdStr);
+
+                            results.Add(new BaseItemDto()
+                            {
+                                Id = stableId,
+                                Name = item.Value<string>("title") ?? item.Value<string>("name"),
+                                OriginalTitle = item.Value<string>("originalTitle") ?? item.Value<string>("originalName"),
+                                SourceType = mediaType,
+                                ProviderIds = new Dictionary<string, string>()
+                                {
+                                    { "JellyseerrRoot", jellyseerrDisplayUrl ?? "" },
+                                    { "Jellyseerr", id.ToString() },
+                                    { "JellyseerrPoster", cachedImageUrl }
+                                },
+                                PremiereDate = DateTime.TryParse(dateTimeString, out var date) ? date : DateTime.MinValue,
+                                Type = mediaType.Equals("tv", StringComparison.OrdinalIgnoreCase) ? "Series" : "Movie" // Hint for client
+                            });
+                        }
+                    }
+                    
+                    page++;
+                }
+            }
+            catch (Exception ex)
+            {
+                m_logger.LogError(ex, "Error fetching Jellyseerr content.");
+            }
+
+            return results;
+        }
+
+        private Guid GetStableHash(string str)
+        {
+            using (var md5 = System.Security.Cryptography.MD5.Create())
+            {
+                var hash = md5.ComputeHash(System.Text.Encoding.Default.GetBytes(str));
+                return new Guid(hash);
+            }
+        }
 
         public async Task<T[]?> GetArrCalendarAsync<T>(ArrServiceType serviceType, DateTime startDate, DateTime endDate)
         {

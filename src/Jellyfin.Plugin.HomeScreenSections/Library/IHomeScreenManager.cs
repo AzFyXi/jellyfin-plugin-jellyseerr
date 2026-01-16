@@ -107,6 +107,8 @@ namespace Jellyfin.Plugin.HomeScreenSections.Library
         public List<string> LockedSections { get; set; } = new List<string>();
         
         public List<string> DefaultEnabledSections { get; set; } = new List<string>();
+
+        public string? JellyseerrExternalUrl { get; set; }
     }
 
     public static class HomeScreenSectionExtensions

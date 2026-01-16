@@ -1,14 +1,11 @@
-﻿using System.Net.Http.Json;
-using Jellyfin.Plugin.HomeScreenSections.Configuration;
-using Jellyfin.Plugin.HomeScreenSections.Helpers;
-using Jellyfin.Plugin.HomeScreenSections.Library;
+﻿using Jellyfin.Plugin.HomeScreenSections.Library;
 using Jellyfin.Plugin.HomeScreenSections.Model.Dto;
 using Jellyfin.Plugin.HomeScreenSections.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Http;
-using Newtonsoft.Json.Linq;
+using Microsoft.Extensions.Logging;
 
 namespace Jellyfin.Plugin.HomeScreenSections.HomeScreen.Sections
 {
@@ -16,6 +13,8 @@ namespace Jellyfin.Plugin.HomeScreenSections.HomeScreen.Sections
     {
         private readonly IUserManager m_userManager;
         private readonly ImageCacheService m_imageCacheService;
+        private readonly ArrApiService m_arrApiService;
+        private readonly ILogger<DiscoverSection> m_logger;
         
         public virtual string? Section => "Discover";
 
@@ -27,106 +26,41 @@ namespace Jellyfin.Plugin.HomeScreenSections.HomeScreen.Sections
 
         protected virtual string JellyseerEndpoint => "/api/v1/discover/trending";
         
-        public DiscoverSection(IUserManager userManager, ImageCacheService imageCacheService)
+        public DiscoverSection(IUserManager userManager, ImageCacheService imageCacheService, ArrApiService arrApiService, ILogger<DiscoverSection> logger)
         {
             m_userManager = userManager;
             m_imageCacheService = imageCacheService;
+            m_arrApiService = arrApiService;
+            m_logger = logger;
         }
         
         public QueryResult<BaseItemDto> GetResults(HomeScreenSectionPayload payload, IQueryCollection queryCollection)
         {
-            List<BaseItemDto> returnItems = new List<BaseItemDto>();
-            
-            // TODO: Get Jellyseerr Url
-            string? jellyseerrUrl = HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrUrl;
-            string? jellyseerrExternalUrl = HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrExternalUrl;
-            
-            // Use external URL for frontend links if configured, otherwise fall back to internal URL
-            string? jellyseerrDisplayUrl = !string.IsNullOrEmpty(jellyseerrExternalUrl) ? jellyseerrExternalUrl : jellyseerrUrl;
-
-            if (string.IsNullOrEmpty(jellyseerrUrl))
-            {
-                return new QueryResult<BaseItemDto>();
-            }
-            
             User? user = m_userManager.GetUserById(payload.UserId);
-            
-            HttpClient client = new HttpClient();
-            client.BaseAddress = new Uri(jellyseerrUrl);
-            client.DefaultRequestHeaders.Add("X-Api-Key", HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrApiKey);
-            
-            HttpResponseMessage usersResponse = client.GetAsync($"/api/v1/user?q={user.Username}").GetAwaiter().GetResult();
-            string userResponseRaw = usersResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-            int? jellyseerrUserId = JObject.Parse(userResponseRaw).Value<JArray>("results")!.OfType<JObject>().FirstOrDefault(x => x.Value<string>("jellyfinUsername") == user.Username)?.Value<int>("id");
-
-            if (jellyseerrUserId == null)
+            if (user == null)
             {
+                m_logger.LogWarning("User with Id {UserId} not found.", payload.UserId);
                 return new QueryResult<BaseItemDto>();
             }
-            
-            client.DefaultRequestHeaders.Add("X-Api-User", jellyseerrUserId.ToString());
 
-            // Make the API call to discover and get the 20 results
-            int page = 1;
-            do 
+            try
             {
-                HttpResponseMessage discoverResponse = client.GetAsync($"{JellyseerEndpoint}?page={page}").GetAwaiter().GetResult();
-
-                if (discoverResponse.IsSuccessStatusCode)
+                // Synchronously wait for the async task since the interface requires synchronous return.
+                // Ideally, this should be refactored to support async if possible, but given the constraints, this works.
+                List<BaseItemDto> returnItems = m_arrApiService.GetJellyseerrContentAsync(JellyseerEndpoint, user.Username).GetAwaiter().GetResult();
+                
+                return new QueryResult<BaseItemDto>()
                 {
-                    string jsonRaw = discoverResponse.Content.ReadAsStringAsync().GetAwaiter().GetResult();
-                    JObject? jsonResponse = JObject.Parse(jsonRaw);
-
-                    if (jsonResponse != null)
-                    {
-                        foreach (JObject item in jsonResponse.Value<JArray>("results")!.OfType<JObject>().Where(x => !x.Value<bool>("adult")))
-                        {
-                            if (!string.IsNullOrEmpty(HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrPreferredLanguages) && 
-                                !HomeScreenSectionsPlugin.Instance.Configuration.JellyseerrPreferredLanguages.Split(',')
-                                    .Select(x => x.Trim()).Contains(item.Value<string>("originalLanguage")))
-                            {
-                                continue;
-                            }
-                            
-                            if (item.Value<JObject>("mediaInfo") == null)
-                            {
-                                string dateTimeString = item.Value<string>("firstAirDate") ??
-                                                        item.Value<string>("releaseDate") ?? "1970-01-01";
-                                
-                                if (string.IsNullOrWhiteSpace(dateTimeString))
-                                {
-                                    dateTimeString = "1970-01-01";
-                                }
-                                
-                                string posterPath = item.Value<string>("posterPath") ?? "404";
-                                string cachedImageUrl = GetCachedImageUrl($"https://image.tmdb.org/t/p/w600_and_h900_bestv2{posterPath}");
-                                
-                                returnItems.Add(new BaseItemDto()
-                                {
-                                    Name = item.Value<string>("title") ?? item.Value<string>("name"),
-                                    OriginalTitle = item.Value<string>("originalTitle") ?? item.Value<string>("originalName"),
-                                    SourceType = item.Value<string>("mediaType"),
-                                    ProviderIds = new Dictionary<string, string>()
-                                    {
-                                        { "JellyseerrRoot", jellyseerrDisplayUrl },
-                                        { "Jellyseerr", item.Value<int>("id").ToString() },
-                                        { "JellyseerrPoster", cachedImageUrl }
-                                    },
-                                    PremiereDate = DateTime.Parse(dateTimeString)
-                                });
-                            }
-                        }
-                    }
-                }
-
-                page++;
-            } while (returnItems.Count < 20);
-            return new QueryResult<BaseItemDto>()
+                    Items = returnItems,
+                    StartIndex = 0,
+                    TotalRecordCount = returnItems.Count
+                };
+            }
+            catch (Exception ex)
             {
-                Items = returnItems,
-                StartIndex = 0,
-                TotalRecordCount = returnItems.Count
-            };
+                m_logger.LogError(ex, "Error getting results for DiscoverSection.");
+                return new QueryResult<BaseItemDto>();
+            }
         }
 
         protected string GetCachedImageUrl(string sourceUrl)
