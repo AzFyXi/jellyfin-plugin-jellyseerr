@@ -1,4 +1,6 @@
-﻿using Jellyfin.Plugin.HomeScreenSections.Library;
+﻿using Jellyfin.Plugin.HomeScreenSections.Configuration;
+using Jellyfin.Plugin.HomeScreenSections.Helpers;
+using Jellyfin.Plugin.HomeScreenSections.Library;
 using Jellyfin.Plugin.HomeScreenSections.Model.Dto;
 using Jellyfin.Plugin.HomeScreenSections.Services;
 using MediaBrowser.Controller.Library;

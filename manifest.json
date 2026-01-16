@@ -1,0 +1,20 @@
+[
+  {
+    "guid": "b8298e01-2697-407a-b44d-aa8dc795e850",
+    "name": "Home Screen Sections",
+    "description": "A Jellyfin plugin which allows users to update their web client's home screen to be a bit more dynamic and more \"Netflixy\".",
+    "overview": "Update your home screen to be more dynamic with custom sections like 'Because You Watched', 'Discover', and more.",
+    "owner": "IAmParadox27",
+    "category": "UI",
+    "versions": [
+      {
+        "version": "2.5.0.0",
+        "changelog": "Update for Jellyfin 10.11.5 compatibility. Added robust Jellyseerr integration.",
+        "targetAbi": "10.11.5.0",
+        "sourceUrl": "https://github.com/IAmParadox27/jellyfin-plugin-home-sections/releases/download/v2.5.0.0/Jellyfin.Plugin.HomeScreenSections.zip",
+        "checksum": "00000000000000000000000000000000",
+        "timestamp": "2026-01-16T12:00:00Z"
+      }
+    ]
+  }
+]

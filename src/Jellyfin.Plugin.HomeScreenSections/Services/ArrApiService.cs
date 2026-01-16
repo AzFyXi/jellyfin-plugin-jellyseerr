@@ -152,7 +152,7 @@ namespace Jellyfin.Plugin.HomeScreenSections.Services
                                     { "JellyseerrPoster", cachedImageUrl }
                                 },
                                 PremiereDate = DateTime.TryParse(dateTimeString, out var date) ? date : DateTime.MinValue,
-                                Type = mediaType.Equals("tv", StringComparison.OrdinalIgnoreCase) ? "Series" : "Movie" // Hint for client
+                                Type = mediaType.Equals("tv", StringComparison.OrdinalIgnoreCase) ? BaseItemKind.Series : BaseItemKind.Movie
                             });
                         }
                     }
