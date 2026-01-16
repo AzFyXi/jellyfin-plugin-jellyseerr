@@ -12,7 +12,7 @@
         "changelog": "Update for Jellyfin 10.11.5 compatibility. Added robust Jellyseerr integration.",
         "targetAbi": "10.11.5.0",
         "sourceUrl": "https://github.com/IAmParadox27/jellyfin-plugin-home-sections/releases/download/v2.5.0.0/Jellyfin.Plugin.HomeScreenSections.zip",
-        "checksum": "00000000000000000000000000000000",
+        "checksum": "46F37640DABFB641BEF8E5AF181ED9C5",
         "timestamp": "2026-01-16T12:00:00Z"
       }
     ]
